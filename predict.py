@@ -1,9 +1,20 @@
+import time
 import datetime
 import random
 
 MARKER = "anotherjesse-sd-timings-%s" % random.randint(0, 1000000)
 
-print(MARKER, "start:", datetime.datetime.now())
+last = start = time.time()
+
+
+def crappy_log(*args):
+    global last
+    t = time.time()
+    print(MARKER, *args, "%0.2f" % (t - start), "%0.2f" % (t - last))
+    last = t
+
+
+crappy_log("start")
 
 from typing import Iterator
 
@@ -22,32 +33,105 @@ from diffusers import (
     UniPCMultistepScheduler,
 )
 
-MODEL_CACHE = "diffusers-cache"
-BASE_MODEL_PATH = "./weights"
-
-print(MARKER, "finished imports:", datetime.datetime.now())
+crappy_log("finished imports")
 
 
 class Predictor(BasePredictor):
     def setup(self):
         """Load the model into memory to make running multiple predictions efficient"""
-        print(MARKER, "Loading pipeline...", datetime.datetime.now())
+        crappy_log("starting setup")
 
-        if not os.path.exists(BASE_MODEL_PATH):
+        if not os.path.exists("./weights"):
             self.real = False
             return
 
-        print(MARKER, "Loading txt2img...")
-        self.txt2img_pipe = StableDiffusionPipeline.from_pretrained(
-            BASE_MODEL_PATH,
-            torch_dtype=torch.float16,
-            local_files_only=True,
-        ).to("cuda")
+        if True:
+            self.txt2img_pipe = StableDiffusionPipeline.from_pretrained(
+                "./weights",
+                torch_dtype=torch.float16,
+                local_files_only=True,
+                safety_checker=None,
+            )
+            crappy_log("finished importing pipeline")
+        else:
+            from diffusers.models import AutoencoderKL, UNet2DConditionModel
+            from transformers import CLIPTextModel, CLIPTokenizer
+            from diffusers.pipelines.stable_diffusion.safety_checker import (
+                StableDiffusionSafetyChecker,
+            )
+            from transformers import CLIPFeatureExtractor
+
+            vae = AutoencoderKL.from_pretrained(
+                "./weights",
+                torch_dtype=torch.float16,
+                local_files_only=True,
+                subfolder="vae",
+            )
+            crappy_log("loaded vae")
+
+            unet = UNet2DConditionModel.from_pretrained(
+                "./weights",
+                torch_dtype=torch.float16,
+                local_files_only=True,
+                subfolder="unet",
+            )
+            crappy_log("loaded unet")
+
+            text_encoder = CLIPTextModel.from_pretrained(
+                "./weights",
+                torch_dtype=torch.float16,
+                local_files_only=True,
+                subfolder="text_encoder",
+            )
+            crappy_log("loaded text_encoder")
+
+            tokenizer = CLIPTokenizer.from_pretrained(
+                "./weights",
+                torch_dtype=torch.float16,
+                local_files_only=True,
+                subfolder="tokenizer",
+            )
+            crappy_log("loaded tokenizer")
+
+            scheduler = DDIMScheduler.from_pretrained(
+                "./weights/scheduler/scheduler_config.json"
+            )
+            crappy_log("loaded scheduler")
+
+            safety_checker = StableDiffusionSafetyChecker.from_pretrained(
+                "./weights",
+                torch_dtype=torch.float16,
+                local_files_only=True,
+                subfolder="safety_checker",
+            )
+            crappy_log("loaded safety_checker")
+
+            feature_extractor = CLIPFeatureExtractor.from_pretrained(
+                "./weights",
+                torch_dtype=torch.float16,
+                local_files_only=True,
+                subfolder="feature_extractor",
+            )
+            crappy_log("loaded feature_extractor")
+
+            self.txt2img_pipe = StableDiffusionPipeline(
+                vae=vae,
+                unet=unet,
+                text_encoder=text_encoder,
+                tokenizer=tokenizer,
+                scheduler=scheduler,
+                safety_checker=safety_checker,
+                feature_extractor=feature_extractor,
+            )
+            crappy_log("manually created pipeline")
+
+        self.txt2img_pipe.to("cuda")
+        crappy_log("moved to cuda")
 
         self.safety_checker = self.txt2img_pipe.safety_checker
         self.real = True
 
-        print(MARKER, "loaded  pipeline...", datetime.datetime.now())
+        crappy_log("finished setup")
 
     def make_scheduler(self, name, config):
         return {
@@ -123,7 +207,7 @@ class Predictor(BasePredictor):
         if not self.real:
             raise RuntimeError("This is a template, not a real model - add weights")
 
-        print(MARKER, "Using txt2img pipeline")
+        crappy_log("Using txt2img pipeline")
         pipe = self.txt2img_pipe
         extra_kwargs = {
             "width": width,
@@ -132,7 +216,8 @@ class Predictor(BasePredictor):
 
         if seed is None:
             seed = int.from_bytes(os.urandom(2), "big")
-        print(MARKER, f"Using seed: {seed}")
+
+        crappy_log("Using seed: ", seed)
 
         if width * height > 786432:
             raise ValueError(
